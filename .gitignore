@@ -1,0 +1,17 @@
+# Claude 內部使用（不推上 GitHub）
+CLAUDE.md
+journal/claude/
+.claude/
+
+# Obsidian 設定
+.obsidian/
+
+# OS 編譯產物
+*.o
+*.elf
+*.bin
+*.img
+*.map
+
+# macOS
+.DS_Store
