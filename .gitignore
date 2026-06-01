@@ -6,7 +6,7 @@ journal/claude/
 # Obsidian 設定
 .obsidian/
 
-# OS 編譯產物
+# OS 編譯產物與下載的韌體
 *.o
 *.elf
 *.bin
