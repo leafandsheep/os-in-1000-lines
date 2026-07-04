@@ -8,6 +8,6 @@ QEMU=qemu-system-riscv32
 CC=/opt/homebrew/opt/llvm/bin/clang 
 CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv32-unknown-elf -fuse-ld=lld -fno-stack-protector -ffreestanding -nostdlib"
 #接著編譯kernel
-$CC $CFLAGS -Wl,-Tkernel.ld -Wl,-Map=kernel.map -o kernel.elf kernel.c 
+$CC $CFLAGS -Wl,-Tkernel.ld -Wl,-Map=kernel.map -o kernel.elf kernel.c common.c 
 #map可以直接看到記憶體位置是怎麼樣被分配的 ps.elf=Executable and linkeable Format
 $QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot -kernel kernel.elf
