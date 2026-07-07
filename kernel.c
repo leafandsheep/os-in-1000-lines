@@ -38,6 +38,9 @@ void putchar(char c){//包裝去使用sbi_call而sbi_call去使用ecall
 void kernel_main(void){
     memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
 
+    PANIC("PANIC test");//ch07實作PANIC跑看看
+
+
     const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld
     for(const char*p =s;*p!='\0';p++){
         putchar(*p);//要去實作輸出單個字元的函式 利用sbi_call
