@@ -5,14 +5,7 @@
 
 
 
-void *memset(void *buf, char c, size_t n){//函數型別是萬用指標
-    uint8_t *p = (uint8_t *) buf;
-    while(n--){
-        *p = c;
-        p++;
-    }
-    return buf;
-}
+
 
 //然後寫putchar要用的sbi_call sbi_call是依據不同參數呼叫ecall的函式
 struct sbiret sbi_call(long arg0, long arg1, long arg2,long arg3,long arg4,long arg5 ,long fid,long eid){//參數用long 表示參數size跟隨word大小 其中eid表示某一類指令 再根據fid鎖定 
