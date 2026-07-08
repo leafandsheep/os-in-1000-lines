@@ -38,7 +38,9 @@ void putchar(char c){//包裝去使用sbi_call而sbi_call去使用ecall
 void kernel_main(void){
     memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
 
-    PANIC("PANIC test");//ch07實作PANIC跑看看
+    WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
+    __asm__ __volatile__("unimp");//這裡我們用unimp保證執行一個例外（unimplemented）
+    //PANIC("PANIC test");//ch07實作PANIC跑看看
 
 
     const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld
@@ -68,4 +70,92 @@ void boot (void){
         :[stack_top] "r" (__stack_top) //[stack_top]暫存器讀__stack_top這個c變數的值
 
     );
+}
+
+__attribute__((naked))
+__attribute__((aligned(4)))
+void kernel_entry(void){
+    __asm__ __volatile__(//這邊一樣練習祭祖教過的操作
+        "csrw sscratch, sp\n"//把sp複製到sscratch暫存 因為等等要跳sp
+        "addi sp, sp, -4*31\n"//開31個空間存通用暫存器的原始值 並不要讓例外處理時影響原本狀態
+        "sw ra, 4*0(sp)\n"
+        "sw gp, 4*1(sp)\n"
+        "sw tp, 4*2(sp)\n"
+        "sw t0, 4*3(sp)\n"
+        "sw t1, 4*4(sp)\n"
+        "sw t2, 4*5(sp)\n"
+        "sw t3, 4*6(sp)\n"
+        "sw t4, 4*7(sp)\n"
+        "sw t5, 4*8(sp)\n"
+        "sw t6, 4*9(sp)\n"
+        "sw a0, 4*10(sp)\n"
+        "sw a1, 4*11(sp)\n"
+        "sw a2, 4*12(sp)\n"
+        "sw a3, 4*13(sp)\n"
+        "sw a4, 4*14(sp)\n"
+        "sw a5, 4*15(sp)\n"
+        "sw a6, 4*16(sp)\n"
+        "sw a7, 4*17(sp)\n"
+        "sw s0, 4*18(sp)\n"
+        "sw s1, 4*19(sp)\n"
+        "sw s2, 4*20(sp)\n"
+        "sw s3, 4*21(sp)\n"
+        "sw s4, 4*22(sp)\n"
+        "sw s5, 4*23(sp)\n"
+        "sw s6, 4*24(sp)\n"
+        "sw s7, 4*25(sp)\n"
+        "sw s8, 4*26(sp)\n"
+        "sw s9, 4*27(sp)\n"
+        "sw s10, 4*28(sp)\n"
+        "sw s11, 4*29(sp)\n"
+        //最後記得存原始sp
+        "csrr a0,sscratch\n"//此處可以用a0因為我們已經存好a0了
+        "sw a0,4*30(sp)\n"
+
+        //接下來給Ｃ寫的handle_trap處理 先把新sp這個參數放a0
+        "mv a0, sp\n"
+        "call handle_trap\n"//下面我們會實作handle_trap 函式
+
+        //處理完例外後暫存器載回原來狀態
+        "lw ra, 4*0(sp)\n"
+        "lw gp, 4*1(sp)\n"
+        "lw tp, 4*2(sp)\n"
+        "lw t0, 4*3(sp)\n"
+        "lw t1, 4*4(sp)\n"
+        "lw t2, 4*5(sp)\n"
+        "lw t3, 4*6(sp)\n"
+        "lw t4, 4*7(sp)\n"
+        "lw t5, 4*8(sp)\n"
+        "lw t6, 4*9(sp)\n"
+        "lw a0, 4*10(sp)\n"
+        "lw a1, 4*11(sp)\n"
+        "lw a2, 4*12(sp)\n"
+        "lw a3, 4*13(sp)\n"
+        "lw a4, 4*14(sp)\n"
+        "lw a5, 4*15(sp)\n"
+        "lw a6, 4*16(sp)\n"
+        "lw a7, 4*17(sp)\n"
+        "lw s0, 4*18(sp)\n"
+        "lw s1, 4*19(sp)\n"
+        "lw s2, 4*20(sp)\n"
+        "lw s3, 4*21(sp)\n"
+        "lw s4, 4*22(sp)\n"
+        "lw s5, 4*23(sp)\n"
+        "lw s6, 4*24(sp)\n"
+        "lw s7, 4*25(sp)\n"
+        "lw s8, 4*26(sp)\n"
+        "lw s9, 4*27(sp)\n"
+        "lw s10, 4*28(sp)\n"
+        "lw s11, 4*29(sp)\n"
+        "lw sp, 4*30(sp)\n"
+        "sret\n"//很重要 因為是stvec進來的 不是存ra要從sepc回去 
+        
+    );
+}
+void handle_trap(struct trap_frame* f){//讀取三個暫存器的值後報錯停機
+    uint32_t scause = READ_CSR(scause);
+    uint32_t stval = READ_CSR(stval);
+    uint32_t user_pc = READ_CSR(sepc);//例外前執行到哪
+
+    PANIC("unexpected trap scause =%x, stval=%x, sepc=%x\n",scause , stval,user_pc);
 }
