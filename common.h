@@ -29,3 +29,6 @@ int strcmp(const char* s1, const char* s2);
 
 //宣告printf
 void printf(const char* c,...);
+
+//ch9需要定義PAGE_ZIZE
+#define PAGE_SIZE 4096

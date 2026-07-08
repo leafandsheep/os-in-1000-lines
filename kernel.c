@@ -35,28 +35,6 @@ void putchar(char c){//包裝去使用sbi_call而sbi_call去使用ecall
 }
 
 
-void kernel_main(void){
-    memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
-
-    WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
-    __asm__ __volatile__("unimp");//這裡我們用unimp保證執行一個例外（unimplemented）
-    //PANIC("PANIC test");//ch07實作PANIC跑看看
-
-
-    const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld
-    for(const char*p =s;*p!='\0';p++){
-        putchar(*p);//要去實作輸出單個字元的函式 利用sbi_call
-    }
-
-    //接下來測試ch5中的printf
-    int a=6;
-    printf("1+2+3=%d\nyou%s\nhex:0x%x\n",a,"good",0xff);
-
-    for(;;){
-        __asm__ __volatile__("wfi");//cpu低效能待機狀態，特權指令wait for interrupt
-    }
-    
-}
 
 __attribute__((section(".text.boot")))//要放在最一開始
 __attribute__((naked))//裸函式 不用先去開stack(應為還沒有)
@@ -158,4 +136,46 @@ void handle_trap(struct trap_frame* f){//讀取三個暫存器的值後報錯停
     uint32_t user_pc = READ_CSR(sepc);//例外前執行到哪
 
     PANIC("unexpected trap scause =%x, stval=%x, sepc=%x\n",scause , stval,user_pc);
+}
+//接下來實作分配n頁的函式ch9
+extern char __free_ram[],__free_ram_end[];//先引用ld的對應位置
+paddr_t alloc_pages(uint32_t n){
+    static paddr_t next_paddr = (paddr_t)__free_ram; // 用static因為不能每次呼叫都從頭開始
+    paddr_t paddr = next_paddr;//紀錄等等要回傳的位置
+    next_paddr +=n*PAGE_SIZE;
+    //再做個超過自由記憶體容量的檢查
+    if(next_paddr>(paddr_t)__free_ram_end){
+        PANIC("oout of。memory");
+    }
+    memset((void*)paddr,0,n*PAGE_SIZE);//歸零後給出空間
+    return paddr;
+}
+
+void kernel_main(void){
+    memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
+
+    WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
+    //接下來是ch9的記憶體分配測試
+    paddr_t paddr0 = alloc_pages(2);
+    paddr_t paddr1 = alloc_pages(1);
+    printf("alloc_pages test: paddr0 = %x\n",paddr0);
+    printf("alloc_pages test: paddr1 = %x\n",paddr1);
+    PANIC("end");
+    //__asm__ __volatile__("unimp");//這裡我們用unimp保證執行一個例外（unimplemented）
+    //PANIC("PANIC test");//ch07實作PANIC跑看看
+
+
+    const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld
+    for(const char*p =s;*p!='\0';p++){
+        putchar(*p);//要去實作輸出單個字元的函式 利用sbi_call
+    }
+
+    //接下來測試ch5中的printf
+    int a=6;
+    printf("1+2+3=%d\nyou%s\nhex:0x%x\n",a,"good",0xff);
+
+    for(;;){
+        __asm__ __volatile__("wfi");//cpu低效能待機狀態，特權指令wait for interrupt
+    }
+    
 }
