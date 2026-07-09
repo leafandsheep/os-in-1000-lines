@@ -54,7 +54,8 @@ __attribute__((naked))
 __attribute__((aligned(4)))
 void kernel_entry(void){
     __asm__ __volatile__(//這邊一樣練習祭祖教過的操作
-        "csrw sscratch, sp\n"//把sp複製到sscratch暫存 因為等等要跳sp
+        /*"csrw sscratch, sp\n"//把sp複製到sscratch暫存 因為等等要跳sp */
+        "csrrw sp,sscratch,sp\n"//把sp換到要的stack頂
         "addi sp, sp, -4*31\n"//開31個空間存通用暫存器的原始值 並不要讓例外處理時影響原本狀態
         "sw ra, 4*0(sp)\n"
         "sw gp, 4*1(sp)\n"
@@ -89,6 +90,10 @@ void kernel_entry(void){
         //最後記得存原始sp
         "csrr a0,sscratch\n"//此處可以用a0因為我們已經存好a0了
         "sw a0,4*30(sp)\n"
+
+        //接下來是ch10做的更新 重點是sscratch的重新裝填程stack頂的位址
+        "addi a0,sp,4*31\n"
+        "csrw sscratch, a0\n"
 
         //接下來給Ｃ寫的handle_trap處理 先把新sp這個參數放a0
         "mv a0, sp\n"
@@ -151,18 +156,171 @@ paddr_t alloc_pages(uint32_t n){
     return paddr;
 }
 
+//接下來實作ch10的context_switch函式 負責移出先前的sp和移入新加入的sp
+__attribute__((naked))//因為要調sp 不然可能不準
+void switch_context(uint32_t* prev_sp,uint32_t* next_sp){
+    __asm__ __volatile__(
+        //先存prev的暫存器狀態
+        "addi sp, sp,-13*4\n"
+        "sw ra ,0(sp)\n"
+        "sw s0, 1*4(sp)\n"
+        "sw s1, 2*4(sp)\n"
+        "sw s2, 3*4(sp)\n"
+        "sw s3, 4*4(sp)\n"
+        "sw s4, 5*4(sp)\n"
+        "sw s5, 6*4(sp)\n"
+        "sw s6, 7*4(sp)\n"
+        "sw s7, 8*4(sp)\n"
+        "sw s8, 9*4(sp)\n"
+        "sw s9, 10*4(sp)\n"
+        "sw s10, 11*4(sp)\n"
+        "sw s11, 12*4(sp)\n"
+        //接著因為更新sp a的sp要存新的 存回arg1的位置
+        "sw sp, (a0)\n"
+        "lw sp, (a1)\n"//這樣sp就調到next的位置，然後載回狀態進暫存器
+
+        "lw ra, 0*4(sp)\n"
+        "lw s0, 1*4(sp)\n"
+        "lw s1, 2*4(sp)\n"
+        "lw s2, 3*4(sp)\n"
+        "lw s3, 4*4(sp)\n"
+        "lw s4, 5*4(sp)\n"
+        "lw s5, 6*4(sp)\n"
+        "lw s6, 7*4(sp)\n"
+        "lw s7, 8*4(sp)\n"
+        "lw s8, 9*4(sp)\n"
+        "lw s9, 10*4(sp)\n"
+        "lw s10, 11*4(sp)\n"
+        "lw s11, 12*4(sp)\n"
+        "addi sp , sp, 13*4\n"
+        "ret\n"//跳回ra
+
+    );
+}
+//ch10然後實作crreat_process函式 讓pcb和對應函式執行
+struct process procs[PROCS_MAX]; //先建一個process table
+struct process* create_process(uint32_t pc){
+    //先來找空出來的位置
+    struct process* proc = NULL;
+    int i;
+    for( i=0;i<PROCS_MAX;i++){
+        if(procs[i].state==PROC_UNUSED){
+            proc = &procs[i];
+            break;
+        }
+    }
+    if(!proc){
+        PANIC("no free process slots");//沒多餘位置就報錯
+    }
+    //但是這個process物件裡面沒有值 到時候cs會出問題 於是我們初始化他 重點在於操作sp
+    uint32_t* sp = (uint32_t *) &proc->stack[sizeof(proc->stack)];
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = 0;
+    *--sp = (uint32_t)pc;//放ra的
+
+    //最後記得更新pcb狀態
+    proc->pid =i+1;
+    proc->sp = (uint32_t)sp;
+    proc->state = PROC_RUNNABLE;
+
+    return proc;//回傳最後這個pcb的位置
+
+}
+//所以現在來測試開兩個想要用的函式去測試cs和process_create是否成功
+void delay(void){//延遲用s
+    for(int i=0;i<30000000;i++){
+        __asm__ __volatile__(
+            "nop\n"
+        );
+    }
+}
+struct process* proc_a;
+struct process* proc_b;
+
+void proc_A_entry(void){
+    printf("starting process A\n");
+    while(1){
+        putchar('A');
+        /*switch_context(&proc_a->sp,&proc_b->sp);*/
+        delay();
+        yield();
+    }
+}
+void proc_B_entry(void){
+    printf("starting process B\n");
+    while(1){
+        putchar('B');
+        /*switch_context(&proc_b->sp,&proc_a->sp);*/
+        delay();
+        yield();
+    }
+}
+//ch10排程器yield的實作
+struct process* current_proc;
+struct process* idle_proc;
+void yield(void){
+    struct process* next = idle_proc;//當前next先設給idle避免沒地方可跳idle
+    for(int i=0;i<PROCS_MAX;i++){
+        struct process* proc = &procs[(current_proc->pid+i)%PROCS_MAX];//輪詢去找可用空格也避免starvation
+        if(proc->state==PROC_RUNNABLE &&proc->pid>0){
+            next = proc;
+            break;
+        }
+    }
+    if(next == current_proc){
+        return;//不用切換
+    }
+    //加入儲存next的stack頂位置到sscratch
+    __asm__ __volatile__(
+        "csrw sscratch, %[sscratch]\n"
+        :
+        :[sscratch]"r"((uint32_t)&next->stack[sizeof(next->stack)])
+    );
+
+
+    struct process* prev = current_proc;
+    current_proc=next;
+    switch_context(&prev->sp,&next->sp);
+}
+
+
+
+
+
+
+
 void kernel_main(void){
     memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
 
     WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
     //接下來是ch9的記憶體分配測試
-    paddr_t paddr0 = alloc_pages(2);
+    /*paddr_t paddr0 = alloc_pages(2);
     paddr_t paddr1 = alloc_pages(1);
     printf("alloc_pages test: paddr0 = %x\n",paddr0);
     printf("alloc_pages test: paddr1 = %x\n",paddr1);
-    PANIC("end");
+    PANIC("end");*/
     //__asm__ __volatile__("unimp");//這裡我們用unimp保證執行一個例外（unimplemented）
     //PANIC("PANIC test");//ch07實作PANIC跑看看
+
+    //接下來是ch10的測試+yield，先寫idle
+    idle_proc=create_process((uint32_t)NULL);
+    idle_proc->pid=0;//pid前面預設是至少是1 0是非正規
+    current_proc = idle_proc;//這邊是初始化
+
+    proc_a = create_process((uint32_t)proc_A_entry);
+    proc_b = create_process((uint32_t)proc_B_entry);
+    yield();//開始偵測並發布任務
+    PANIC("context switch test for idle version");
 
 
     const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld

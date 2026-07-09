@@ -1,4 +1,7 @@
 #include "common.h"
+typedef unsigned char uint8_t;
+typedef unsigned int uint32_t;
+typedef uint32_t size_t; //從編譯器進行的名稱定應
 
 struct trap_frame{//傳入trap時狀態的結構物件
     uint32_t ra;
@@ -47,9 +50,7 @@ struct trap_frame{//傳入trap時狀態的結構物件
         __asm__ __volatile__("csrw " #reg " ,%0" ::"r"(__tmp));\
     }while(0)
 
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-typedef uint32_t size_t; //從編譯器進行的名稱定應
+
 
 extern char __bss[] , __bss_end[], __stack_top[] ; //引用ld的變數
 
@@ -70,3 +71,17 @@ void putchar(char c);
 //＃＃是為了避免沒有傳入參數
 
 void kernel_entry(void);
+
+//接下來來寫ch10的PCB 呼應OS的process相關內容
+#define PROCS_MAX 8 //process數量最大值，用來開一個process table
+#define PROC_UNUSED 0 //該位置空的沒有行程
+#define PROC_RUNNABLE 1//該位置有行程執行中或是等待執行
+struct process{
+    int pid;
+    int state;//Unused or Runnable
+    vaddr_t sp;
+    uint8_t stack[8192];
+};  
+
+//ch10的yield宣告
+void yield(void);
