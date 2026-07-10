@@ -199,6 +199,7 @@ void switch_context(uint32_t* prev_sp,uint32_t* next_sp){
 }
 //ch10然後實作crreat_process函式 讓pcb和對應函式執行
 struct process procs[PROCS_MAX]; //先建一個process table
+extern char __kernel_base[];
 struct process* create_process(uint32_t pc){
     //先來找空出來的位置
     struct process* proc = NULL;
@@ -228,11 +229,16 @@ struct process* create_process(uint32_t pc){
     *--sp = 0;
     *--sp = (uint32_t)pc;//放ra的
 
+    //ch11給process加上table元素 並且填入表格
+    uint32_t* page_table = (uint32_t*)alloc_pages(1);
+    for(paddr_t paddr =(paddr_t)__kernel_base; paddr<(paddr_t)__free_ram_end;paddr+=PAGE_SIZE ){
+        map_page(page_table,paddr,paddr,PAGE_R|PAGE_W|PAGE_X);//每個process都會畫一次分頁
+    }
     //最後記得更新pcb狀態
     proc->pid =i+1;
     proc->sp = (uint32_t)sp;
     proc->state = PROC_RUNNABLE;
-
+    proc->page_table=page_table;//ch11補的
     return proc;//回傳最後這個pcb的位置
 
 }
@@ -282,9 +288,12 @@ void yield(void){
     }
     //加入儲存next的stack頂位置到sscratch
     __asm__ __volatile__(
+        "sfence.vma\n"//確保之前寫入都落地 沒有留在緩存
+        "csrw satp,%[satp]\n"
+        "sfence.vma\n"//確保tlb更新
         "csrw sscratch, %[sscratch]\n"
         :
-        :[sscratch]"r"((uint32_t)&next->stack[sizeof(next->stack)])
+        :[sscratch]"r"((uint32_t)&next->stack[sizeof(next->stack)]), [satp]"r"(SATP_SV32|(uint32_t)next->page_table>>12)//就是下一個processtable1的物理位址前20bit 符合放入satp的格式      
     );
 
 
@@ -292,6 +301,29 @@ void yield(void){
     current_proc=next;
     switch_context(&prev->sp,&next->sp);
 }
+
+//ch11實作map_page負責建立表 會傳入對應的root表指標 要配對的虛擬位置 物理位置 和flags
+void map_page(uint32_t* table1 ,uint32_t vaddr,paddr_t paddr,uint32_t flags ){
+    //先做格式判斷是否要報錯
+    if(!is_aligned(vaddr,PAGE_SIZE)){
+        PANIC("unaligned vadddr %x",vaddr);
+    }
+    if(!is_aligned(paddr,PAGE_SIZE)){
+        PANIC("unaligned padddr %x",paddr);
+    }
+    //幾下來是透過vaddr確認table各自要填什麼
+    uint32_t vpn1 = (vaddr>>22)&0x3ff;
+    if((table1[vpn1]&PAGE_V)==0){//檢查table1對應欄位是否valid 若不valid要建表
+        uint32_t pt_addr = alloc_pages(1);
+        table1[vpn1] = ((pt_addr>>12)<<10)|PAGE_V; //這樣表裡放的就是對的格式了
+    }
+    
+    uint32_t vpn0 = (vaddr>>12)&0x3ff;
+    uint32_t* table0 = (uint32_t*)((table1[vpn1]>>10)<<12);//這樣可以得出第二層表的表位址，下面再接著填第二層表的內容
+    table0[vpn0]= ((paddr>>12)<<10)|flags|PAGE_V; //table0對應欄位放的就是實際物理位置的前面20bit
+
+}
+
 
 
 

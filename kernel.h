@@ -81,7 +81,19 @@ struct process{
     int state;//Unused or Runnable
     vaddr_t sp;
     uint8_t stack[8192];
+    uint32_t* page_table;//ch11加上的 是第一層table
 };  
 
 //ch10的yield宣告
 void yield(void);
+
+//ch11宣告PTE會用的巨集 注意左移31要unsigned
+#define SATP_SV32 (1u<<31) //是開啟Sv32模式的位元 放在satp暫存器中
+#define PAGE_V (1 <<0)//os學過的valid bit
+#define PAGE_R (1<<1)//可讀
+#define PAGE_W (1<<2)//可寫
+#define PAGE_X (1<<3)//可執行
+#define PAGE_U (1<<4)//user可使用
+
+//ch11
+void map_page(uint32_t* table1,uint32_t vaddr,paddr_t paddr,uint32_t flags );
