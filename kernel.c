@@ -335,6 +335,13 @@ void kernel_main(void){
     memset(__bss,0,(size_t)__bss_end-(size_t)__bss);//清理bss空間
 
     WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
+    
+    //ch12確認shell成功加入
+    extern char _binary_shell_bin_start[];
+    extern char _binary_shell_bin_size[];
+    printf("shell_bin_size = %d\n",(int)_binary_shell_bin_size);
+    printf("shell_bin[0] = %x\n",_binary_shell_bin_start[0]);
+
     //接下來是ch9的記憶體分配測試
     /*paddr_t paddr0 = alloc_pages(2);
     paddr_t paddr1 = alloc_pages(1);
