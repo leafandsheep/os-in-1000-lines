@@ -97,3 +97,10 @@ void yield(void);
 
 //ch11
 void map_page(uint32_t* table1,uint32_t vaddr,paddr_t paddr,uint32_t flags );
+
+//ch13告訴我們user.ld最開始的位置
+#define USER_BASE 0x1000000
+//ch13sstatus暫存器中第五位是SPIE 於是define
+#define SSTATUS_SPIE (1<<5)
+
+

@@ -197,10 +197,22 @@ void switch_context(uint32_t* prev_sp,uint32_t* next_sp){
 
     );
 }
+
+//ch13user_entry在這邊實作
+__attribute__((naked)) void user_entry(void){//用檔sret所以naked
+    __asm__ __volatile__(
+        "csrw sepc, %[sepc]\n"
+        "csrw sstatus,%[sstatus]\n"
+        "sret\n"
+        :
+        :[sepc]"r"(USER_BASE), [sstatus]"r"(SSTATUS_SPIE)//這邊設定到時候trap完成回到user_base以及回去umode後可以繼續中斷
+    );
+} 
+
 //ch10然後實作crreat_process函式 讓pcb和對應函式執行
 struct process procs[PROCS_MAX]; //先建一個process table
 extern char __kernel_base[];
-struct process* create_process(uint32_t pc){
+struct process* create_process(const void* image, size_t image_size){//ch13對傳入參數更改成image,image_size 也就是image在kernel.data的bin_start,bin_size
     //先來找空出來的位置
     struct process* proc = NULL;
     int i;
@@ -226,14 +238,27 @@ struct process* create_process(uint32_t pc){
     *--sp = 0;
     *--sp = 0;
     *--sp = 0;
-    *--sp = 0;
-    *--sp = (uint32_t)pc;//放ra的
+    *--sp = 0;//以上是放暫存器s11~s0
+    //*--sp = (uint32_t)pc;//放ra的 ch10做的現在ch13要更新
+    *--sp = (uint32_t)user_entry;//ch13的更新 蠻有意思 因為process是在s-mode被創造 但要sret回去umode可是這個西的process沒有回去過umode sret讀不到對的值 於是user_entry負責先填好sret要的值好做sret回去umode
 
     //ch11給process加上table元素 並且填入表格
     uint32_t* page_table = (uint32_t*)alloc_pages(1);
     for(paddr_t paddr =(paddr_t)__kernel_base; paddr<(paddr_t)__free_ram_end;paddr+=PAGE_SIZE ){
         map_page(page_table,paddr,paddr,PAGE_R|PAGE_W|PAGE_X);//每個process都會畫一次分頁
     }
+    //ch13這裡要實作把user原本寄放在kernel區的raw_bin複製到user的對應虛擬位址空間
+    for(uint32_t off=0;off<image_size;off+=PAGE_SIZE){
+        paddr_t page =alloc_pages(1); //先開一頁記憶體 單純是要放東西讀空間 是物理位置
+        //接下來要定義兩個變數 一是剩餘多少還沒複製 二是這次要複製的大小
+        size_t remaining = image_size - off;
+        size_t copy_size = PAGE_SIZE<=remaining? PAGE_SIZE: remaining;//如果剩下不夠一頁就不用複製那麼多
+
+        memcpy((void*)page,image+off,copy_size); //可以開始複製
+        map_page(page_table,USER_BASE+off,page,PAGE_U|PAGE_R|PAGE_W|PAGE_X);
+
+    }
+
     //最後記得更新pcb狀態
     proc->pid =i+1;
     proc->sp = (uint32_t)sp;
@@ -324,7 +349,9 @@ void map_page(uint32_t* table1 ,uint32_t vaddr,paddr_t paddr,uint32_t flags ){
 
 }
 
-
+//ch13 用以方便操作shell.bin.o的raw binary
+extern char _binary_shell_bin_start[];
+extern char _binary_shell_bin_size[];//在.sh使用指令編譯成elf時設定的變數 可以直接引用
 
 
 
@@ -337,8 +364,7 @@ void kernel_main(void){
     WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
     
     //ch12確認shell成功加入
-    extern char _binary_shell_bin_start[];
-    extern char _binary_shell_bin_size[];
+   
     printf("shell_bin_size = %d\n",(int)_binary_shell_bin_size);
     printf("shell_bin[0] = %x\n",_binary_shell_bin_start[0]);
 
@@ -352,15 +378,19 @@ void kernel_main(void){
     //PANIC("PANIC test");//ch07實作PANIC跑看看
 
     //接下來是ch10的測試+yield，先寫idle
-    idle_proc=create_process((uint32_t)NULL);
+    idle_proc=create_process(NULL,0);//不用複製image
     idle_proc->pid=0;//pid前面預設是至少是1 0是非正規
     current_proc = idle_proc;//這邊是初始化
 
-    proc_a = create_process((uint32_t)proc_A_entry);
+    /*遮邊是ch10的簡單實作ch13已改掉 僅留存proc_a = create_process((uint32_t)proc_A_entry);
     proc_b = create_process((uint32_t)proc_B_entry);
     yield();//開始偵測並發布任務
-    PANIC("context switch test for idle version");
-
+    PANIC("context switch test for idle version");*/
+    
+    //ch13測試
+    create_process(_binary_shell_bin_start,(size_t)_binary_shell_bin_size);
+    yield();
+    PANIC("test for ch13");
 
     const char* s = "\n\nHello, World!\n";//ch5 輸出helloWorld
     for(const char*p =s;*p!='\0';p++){

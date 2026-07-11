@@ -15,7 +15,7 @@ OBJCOPY=/opt/homebrew/opt/llvm/bin/llvm-objcopy
 $CC $CFLAGS -Wl,-Tuser.ld -Wl,-Map=shell.map -o shell.elf shell.c user.c common.c
 #以下這行是把.elf處理成.bin 而且.bss這個section要填充有位置的0
 $OBJCOPY --set-section-flags .bss=alloc,contents -O binary shell.elf shell.bin
-#以下這行因為linker要吃.o檔 要把 .bin轉成elf 順便提醒riscv是little-end
+#以下這行因為linker要吃.o檔 要把 .bin轉成elf(但是本質還是rawbin) 順便提醒riscv是little-end
 $OBJCOPY -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
 
 #接著編譯kernel
