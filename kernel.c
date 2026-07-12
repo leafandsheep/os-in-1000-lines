@@ -55,7 +55,7 @@ __attribute__((aligned(4)))
 void kernel_entry(void){
     __asm__ __volatile__(//這邊一樣練習祭祖教過的操作
         /*"csrw sscratch, sp\n"//把sp複製到sscratch暫存 因為等等要跳sp */
-        "csrrw sp,sscratch,sp\n"//把sp換到要的stack頂
+        "csrrw sp,sscratch,sp\n"//把process sp換到要的process的kernel stack頂
         "addi sp, sp, -4*31\n"//開31個空間存通用暫存器的原始值 並不要讓例外處理時影響原本狀態
         "sw ra, 4*0(sp)\n"
         "sw gp, 4*1(sp)\n"
@@ -89,7 +89,7 @@ void kernel_entry(void){
         "sw s11, 4*29(sp)\n"
         //最後記得存原始sp
         "csrr a0,sscratch\n"//此處可以用a0因為我們已經存好a0了
-        "sw a0,4*30(sp)\n"
+        "sw a0,4*30(sp)\n"//放a0的是user process的sp
 
         //接下來是ch10做的更新 重點是sscratch的重新裝填程stack頂的位址
         "addi a0,sp,4*31\n"
@@ -140,7 +140,16 @@ void handle_trap(struct trap_frame* f){//讀取三個暫存器的值後報錯停
     uint32_t stval = READ_CSR(stval);
     uint32_t user_pc = READ_CSR(sepc);//例外前執行到哪
 
-    PANIC("unexpected trap scause =%x, stval=%x, sepc=%x\n",scause , stval,user_pc);
+    //ch14 因應user trap進kernel要調用syscall 所以對trap種類做個判斷 去判scause的值
+    if(scause == SCAUSE_ECALL){
+        handle_syscall(f);//f從a0讀的
+        user_pc+=4;//因為回到trap點已經執行完了 可以直接下一個
+    }
+    else {
+        PANIC("unexpected trap scause =%x, stval=%x, sepc=%x\n",scause , stval,user_pc);
+    }
+    WRITE_CSR(sepc, user_pc);//更新sepc
+    
 }
 //接下來實作分配n頁的函式ch9
 extern char __free_ram[],__free_ram_end[];//先引用ld的對應位置
@@ -353,7 +362,37 @@ void map_page(uint32_t* table1 ,uint32_t vaddr,paddr_t paddr,uint32_t flags ){
 extern char _binary_shell_bin_start[];
 extern char _binary_shell_bin_size[];//在.sh使用指令編譯成elf時設定的變數 可以直接引用
 
+//ch14要寫handle_syscall
+void handle_syscall(struct trap_frame* f){//這裡的f是對應的process kernel_stack的sp（低點）
+    if(f->a3==SYS_PUTCHAR){//去看是不是putchar的syscall
+        putchar(f->a0);//就是在user.c時putchar放的字
+    }
+    else if(f->a3==SYS_GETCHAR){
+        while(1){//電腦會一直偵測在按下鍵盤前都是-1
+            long ch = getchar();//調用的是kerne的getchar
+            if(ch>=0){
+                f->a0 = ch;//存到對應位址 不是直接給暫存器
+                break;
+            } 
+            yield();//沒偵測到就yield出去等下次 避免busy_waiting
+        }
+    }
+    else if(f->a3==SYS_EXIT){
+        printf("process %d exited\n",current_proc->pid);//輸出相關參數
+        current_proc->state = PROC_EXITED;//改狀態
+        yield();
+        PANIC("unreachable"); //因為yield出去且狀態終止 所以不會走到這行 但我們也沒有實作free就是了
+    }
+    else {
+        PANIC("unexpected syscall a3=%x\n",f->a3);//報錯錯誤的syscall種類
+    }
 
+}  
+//ch14寫的getchar
+long getchar(void){
+    struct sbiret ret =sbi_call(0,0,0,0,0,0,0,2);//回傳值就是主控台的輸入
+    return ret.error;//回傳值設定上會被放在這邊
+}
 
 
 

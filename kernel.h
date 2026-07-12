@@ -102,5 +102,8 @@ void map_page(uint32_t* table1,uint32_t vaddr,paddr_t paddr,uint32_t flags );
 #define USER_BASE 0x1000000
 //ch13sstatus暫存器中第五位是SPIE 於是define
 #define SSTATUS_SPIE (1<<5)
-
-
+//ch14定義syscall 的scause值
+#define SCAUSE_ECALL 8
+void handle_syscall(struct trap_frame* f);
+long getchar(void);
+#define PROC_EXITED 2 //這是process進入終止的狀態

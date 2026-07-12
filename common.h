@@ -33,3 +33,9 @@ void printf(const char* c,...);
 //ch9需要定義PAGE_ZIZE
 #define PAGE_SIZE 4096
 
+//ch14定義syscall相關參數
+#define SYS_PUTCHAR 1
+//ch14定義getchar參數
+#define SYS_GETCHAR 2
+//ch14定義終止
+#define SYS_EXIT 3
