@@ -107,3 +107,84 @@ void map_page(uint32_t* table1,uint32_t vaddr,paddr_t paddr,uint32_t flags );
 void handle_syscall(struct trap_frame* f);
 long getchar(void);
 #define PROC_EXITED 2 //這是process進入終止的狀態
+
+//ch15 我們加入irtio相關的定義
+//以下是想放的值不是位址
+#define SECTOR_SIZE 512//一個扇區幾個byte
+#define VIRTQ_ENTRY_NUM 16 //開16格descriptor
+#define VIRTIO_DEVICE_BLK 2 //裝置的種類是磁碟
+#define VIRTIO_BLK_PADDR 0x10001000 //MMIO的基底位址
+//以下是基於基底的偏移量 用來算暫存器位址
+#define VIRTIO_REG_MAGIC 0x00//實際是偏移量 從基底去加上 做確認是virtio裝置用
+#define VIRTIO_REG_VERSION 0x04//virtio 的協定版本
+#define VIRTIO_REG_DEVICE_ID 0x08//裝置類型
+#define VIRTIO_REG_PAGE_SIZE 0x28//guest一頁多大（應為4096）用來算頁號 virtqueue的位址
+#define VIRTIO_REG_QUEUE_SEL 0x30//選第幾個virtqueue 但這邊情境是只有一個
+#define VIRTIO_REG_QUEUE_NUM_MAX 0x34//最多幾個descriptor
+#define VIRTIO_REG_QUEUE_NUM  0x38//想開幾個desc
+#define VIRTIO_REG_QUEUE_PFN 0x40//寫virtqueue的頁號
+#define VIRTIO_REG_QUEUE_READY  0x44//就緒標記
+#define VIRTIO_REG_QUEUE_NOTIFY  0x50//索引放好後去通知裝置來avail ring拿
+#define VIRTIO_REG_DEVICE_STATUS 0x70//握手時會對狀態做更改
+#define VIRTIO_REG_DEVICE_CONFIG 0x100//磁碟總共有幾個扇區
+#define VIRTIO_STATUS_ACK 1//握手的狀態值
+#define VIRTIO_STATUS_DRIVER 2//握手的狀態值
+#define VIRTIO_STATUS_DRIVER_OK 4//握手的狀態值
+#define VIRTQ_DESC_F_NEXT 1 //三個一組的descriptor中會設定前兩個有next 最後一個不設
+#define VIRTQ_DESC_F_WRITE 2//裝置能不能寫 data status有時需要裝置寫
+#define VIRTQ_AVAIL_F_NO_INTERRUPT 1//結束後cpu自己檢查
+#define VIRTIO_BLK_T_IN  0//放在header說要讀
+#define VIRTIO_BLK_T_OUT 1//放在header說要寫
+
+// Virtqueue Descriptor Table entry.
+struct virtq_desc {//descriptor的結構
+    uint64_t addr;//緩衝區的物理位址，裡面放header/data/status descs是一個長度3的desc陣列 裡面放desc[0].addr = &header的概念
+    uint32_t len;//緩衝區長度
+    uint16_t flags;//flags(F_NEXT或是F_WRITe)
+    uint16_t next;//指向下一個desc物理位址
+} __attribute__((packed));//不padding
+
+// Virtqueue Available Ring.
+struct virtq_avail {//一個ring就是共用16大小descs
+    uint16_t flags;//這個ring的設定 例如不發中段訊號
+    uint16_t index;//這個ring目前放了幾個請求
+    uint16_t ring[VIRTQ_ENTRY_NUM];//放索引頭的陣列 有幾條鏈 就有幾個頭 像是ring[1]=1表示有一條鏈的頭是descs[1]
+} __attribute__((packed));
+
+// Virtqueue Used Ring entry.
+struct virtq_used_elem {
+    uint32_t id;//那條完成的鏈的頭索引號碼
+    uint32_t len;//device寫的長度(一個chain的總和)
+} __attribute__((packed));
+
+// Virtqueue Used Ring.
+struct virtq_used {
+    uint16_t flags;//device設的flag
+    uint16_t index;//完成幾個 一路加上去
+    struct virtq_used_elem ring[VIRTQ_ENTRY_NUM];
+} __attribute__((packed));
+
+// Virtqueue.
+struct virtio_virtq {///三個環放在一起的最外層 最高層期
+    //這邊是driver和device共用的
+    struct virtq_desc descs[VIRTQ_ENTRY_NUM];//descs table
+    struct virtq_avail avail;//下單的環
+    struct virtq_used used __attribute__((aligned(PAGE_SIZE)));//以完成的環 要對齊
+    
+    //這邊是driver自己用的
+    int queue_index;//第幾個queue
+    volatile uint16_t *used_index;//指向used_index的指標，用volatile表示每次都要重讀
+    uint16_t last_used_index;//driver自己的進度 用來和上面used_index(device)的進度比較
+} __attribute__((packed));
+
+// Virtio-blk request.
+struct virtio_blk_req {
+    uint32_t type;//要讀還是寫
+    uint32_t reserved;
+    uint64_t sector;//要存取的扇區編號
+    uint8_t data[512];//緩衝區
+    uint8_t status; //device回報是否執行成功寫這裡
+} __attribute__((packed));
+
+//ch15初始化virtq宣告
+struct virtio_virtq* virtq_init(unsigned index);
