@@ -214,7 +214,9 @@ __attribute__((naked)) void user_entry(void){//用檔sret所以naked
         "csrw sstatus,%[sstatus]\n"
         "sret\n"
         :
-        :[sepc]"r"(USER_BASE), [sstatus]"r"(SSTATUS_SPIE)//這邊設定到時候trap完成回到user_base以及回去umode後可以繼續中斷
+        :[sepc]"r"(USER_BASE), [sstatus]"r"(SSTATUS_SPIE|SSTATUS_SUM)
+        //這邊設定到時候trap完成回到user_base以及回去umode後可以繼續中斷
+        //ch16更新了SSTATUS_SUM讓kernel函式可以動user記憶體位址
     );
 } 
 
@@ -386,6 +388,43 @@ void handle_syscall(struct trap_frame* f){//這裡的f是對應的process kernel
         yield();
         PANIC("unreachable"); //因為yield出去且狀態終止 所以不會走到這行 但我們也沒有實作free就是了
     }
+    else if(f->a3==SYS_READFILE){
+        const char* filename=(const char* )f->a0;
+        char* buf= (char*)f->a1;//很重要 這裡的buf是user_buf
+        int len = f->a2;//以上三個讀取暫存器參數 因為ecall直接跳
+
+        struct file* file=fs_lookup(filename);
+        if(!file){
+            printf("file not found: %s\n", filename);//報錯找不到
+            f->a0 = -1;
+            return;
+        }
+        if(len>(int)sizeof(file->data)){
+            len=file->size;//len不能超過
+        }
+        memcpy(buf,file->data,len);//檔案複製給user_buf 此時在kernel動用到user記憶體空間 會有問題 後面會處理
+        f->a0 =len;
+        
+        }
+    else if(f->a3==SYS_WRITEFILE){
+        const char* filename=(const char* )f->a0;
+        char* buf= (char*)f->a1;
+        int len = f->a2;//以上三個讀取暫存器參數 因為ecall直接跳
+
+        struct file* file=fs_lookup(filename);
+        if(!file){
+            printf("file not found: %s\n", filename);//報錯找不到
+            f->a0 = -1;
+            return;
+        }
+        if(len>(int)sizeof(file->data)){
+            len=file->size;//len不能超過
+        }
+        memcpy(file->data,buf,len);
+        file->size=len;
+        fs_flush();//推進磁碟
+        f->a0 =len;
+    }
     else {
         PANIC("unexpected syscall a3=%x\n",f->a3);//報錯錯誤的syscall種類
     }
@@ -511,10 +550,100 @@ void read_write_disk(void* buf, unsigned sector,int is_write){//傳入參數有r
     }
 }
 
+//ch16先開檔案櫃和緩衝區disk
+struct file files[FILES_MAX];
+uint8_t disk[DISK_MAX_SIZE];
+//ch16實作八進位數轉整數，ustar填入都是8進位
+int oct2int(char* oct, int len) {//填入陣列與長度
+    int dec =0;
+    for (int i = 0; i < len; i++) {
+        if (oct[i] < '0' || oct[i] > '7')//遇到‘\0’就跳出
+            break;
+        dec = dec *8 + (oct[i] -'0');//進位加上個位數
+    }
+    return dec;
+}
+//ch16再接著實作從磁碟到disk再到填寫好file元素內容的函式
+void fs_init(void) {
+    for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++)
+        read_write_disk(&disk[sector * SECTOR_SIZE], sector, false);//先以sector為單位複製好磁碟內容到disk
 
+    unsigned off = 0;//一次處理一個檔案 off是每個檔案間的隔斷
+    for (int i = 0; i < FILES_MAX; i++) {
+        struct tar_header* header = (struct tar_header *) &disk[off];//取一個header物件
+        if (header->name[0] == '\0'){
+            break;//沒有檔案就挑過
+        }
+        if (strcmp(header->magic, "ustar") != 0){//確認不是tar格式要報錯
+            PANIC("invalid tar header: magic=\"%s\"", header->magic);// \"是打出單個引號的意思
+        }
+        int filesz = oct2int(header->size, sizeof(header->size));//讀檔案長度
+        struct file* file = &files[i];//開一個檔案物件指標
+        file->in_use = true;//這個file格子有人了
+        strcpy(file->name, header->name);//寫file元素
+        memcpy(file->data, header->data, filesz);//寫file元素
+        file->size = filesz;//寫file元素
+        printf("file: %s, size=%d\n", file->name, file->size);
 
+        off += align_up(sizeof(struct tar_header) + filesz, SECTOR_SIZE);//最後跳到下一個檔案起始點
+    }
+}
+//接下來實作檔案寫回磁碟的函式：讀file存header
+void fs_flush(void) {
+    memset(disk, 0, sizeof(disk));//先清空disk緩衝空間
+    unsigned off = 0;
+    for (int file_i = 0; file_i < FILES_MAX; file_i++) {//逐檔案寫入
+        struct file *file = &files[file_i];//建立指向檔案的指標
+        if (!file->in_use){
+            continue;//不存在就跳過
+        }
+            
+        struct tar_header* header = (struct tar_header*) &disk[off];//header起始位址
+        memset(header, 0, sizeof(*header));//disk區段先歸零
+        strcpy(header->name, file->name);//填入檔案名稱
+        strcpy(header->mode, "000644");//填入權限
+        strcpy(header->magic, "ustar");//權限：rw-r--r--
+        strcpy(header->version, "00");//填入版本
+        header->type = '0';//填入檔案種類，一般檔案
 
+        int filesz = file->size;
+        for (int i = sizeof(header->size); i > 0; i--) {
+            header->size[i-1] = (filesz % 8) +'0';//把檔案大小從整數轉入8進位陣列
+            filesz /= 8;
+        }
 
+        int checksum = ' ' * sizeof(header->checksum);//接著計算checksum checksum是把header每一個byte相加 原本checksum位址補上8個空格
+        for (unsigned i = 0; i < sizeof(struct tar_header); i++){
+            checksum += (unsigned char) disk[off + i];
+        }
+        //接著存checksum 也是8進位陣列
+        for (int i=5; i >= 0; i--) {
+            header->checksum[i] = (checksum % 8) +'0';
+            checksum /= 8;
+        }
+        //接者把filedata複製到header裡
+        memcpy(header->data, file->data, file->size);
+        off += align_up(sizeof(struct tar_header) + file->size, SECTOR_SIZE);//最後跳到下一個檔案在disk的開始位址
+    }
+
+    
+    for (unsigned sector = 0; sector < sizeof(disk) / SECTOR_SIZE; sector++){
+        read_write_disk(&disk[sector * SECTOR_SIZE], sector, true);//最後把disk緩衝區寫盡磁碟
+    }
+        
+
+    printf("wrote %d bytes to disk\n", sizeof(disk));
+}
+//這邊是實作查詢對應檔案名並且回傳對應檔案的位址 ch16
+struct file* fs_lookup(const char* filename) {
+    for (int i = 0; i < FILES_MAX; i++) {
+        struct file* file = &files[i];
+        if (!strcmp(file->name, filename)){
+            return file;//相等就回傳
+        }
+    }
+    return NULL;
+}
 
 
 void kernel_main(void){
@@ -522,7 +651,9 @@ void kernel_main(void){
 
     WRITE_CSR(stvec,(uint32_t)kernel_entry);//把trap入口位置寫給stvec
     virtio_blk_init();//對drive初始化
-    char buf[SECTOR_SIZE];//建立buf
+    fs_init();//從磁碟讀取到disk並填寫file表
+
+    /*char buf[SECTOR_SIZE];//建立buf
     read_write_disk(buf,0,false);//讀第一塊扇區
     printf("first sector: %s\n",buf);
 
@@ -534,7 +665,7 @@ void kernel_main(void){
     //ch12確認shell成功加入
    
     printf("shell_bin_size = %d\n",(int)_binary_shell_bin_size);
-    printf("shell_bin[0] = %x\n",_binary_shell_bin_start[0]);
+    printf("shell_bin[0] = %x\n",_binary_shell_bin_start[0]);*/
 
     //接下來是ch9的記憶體分配測試
     /*paddr_t paddr0 = alloc_pages(2);

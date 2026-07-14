@@ -188,3 +188,42 @@ struct virtio_blk_req {
 
 //ch15初始化virtq宣告
 struct virtio_virtq* virtq_init(unsigned index);
+
+//ch16定義tar檔案系統相關的結構與參數
+#define FILES_MAX 2 //本次最多放兩個檔案在disk
+#define DISK_MAX_SIZE align_up(sizeof(struct file) * FILES_MAX, SECTOR_SIZE)//去算disk要有奪大
+struct tar_header {//磁碟上 為了滿足ustar格式
+    char name[100];//檔名
+    char mode[8];//權限
+    char uid[8];//擁有者userid
+    char gid[8];//擁有者的groupid
+    char size[12];//純data檔案大小
+    char mtime[12];//修改時間
+    char checksum[8];//把header的所有值做加總
+    char type;//檔案類型
+    char linkname[100];
+    char magic[6];//ustar格式識別
+    char version[2];//版本
+    char uname[32];//擁有者名字
+    char gname[32];//擁有者群組名字
+    char devmajor[8];
+    char devminor[8];
+    char prefix[155];
+    char padding[12];//把struct長度湊到512
+    char data[];//開個指標指向struct最頂部
+} __attribute__((packed));
+
+struct file {//記憶體 kerbel用的格式
+    bool in_use;//這個file格子有人了
+    char name[100]; //檔名
+    char data[1024]; //檔站內容
+    size_t size; //檔案大小
+};
+
+//ch16函式宣告
+void fs_flush(void);
+struct file* fs_lookup(const char* filename);
+
+//ch16 sstatus的問題 先定義SUM參數
+#define SSTATUS_SUM  (1 << 18) //對應開關位址
+

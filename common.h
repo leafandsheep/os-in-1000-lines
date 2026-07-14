@@ -39,3 +39,7 @@ void printf(const char* c,...);
 #define SYS_GETCHAR 2
 //ch14定義終止
 #define SYS_EXIT 3
+
+//ch16給應用程式用讀取和寫入檔案的參數，也就是第四和第五個sys指令
+#define SYS_READFILE 4
+#define SYS_WRITEFILE 5

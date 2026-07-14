@@ -35,6 +35,15 @@ void main(void){
                 printf("exit\n");
                 exit();//終止執行
             }
+            else if (strcmp(cmdline,"readfile")==0){
+                char user_buf[128];//user的buf開在這裡
+                int len = readfile("hello.txt",user_buf,sizeof(user_buf));
+                user_buf[len] = '\0';//補結尾標記
+                printf("%s\n",user_buf);
+            }
+            else if (strcmp(cmdline,"writefile")==0){
+                writefile("hello.txt","HELLO TO PROFESSORS!",20);
+            }    
             else{
                 printf("unknown command:%s\n",cmdline);
             }

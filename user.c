@@ -29,6 +29,15 @@ int getchar(void){
     return syscall(SYS_GETCHAR,0,0,0);//現在要去實作第二種syscall指令
 }
 
+//ch16做user用的readfile和writefile函式
+int readfile(const char* filename, char* buf,int len) {//函數回傳的是讀多少byte
+    return syscall(SYS_READFILE, (int) filename, (int) buf, len);//這裡len是disk緩衝區大小
+}
+
+int writefile(const char* filename, const char* buf, int len) {//函數回傳的是寫多少byte
+    return syscall(SYS_WRITEFILE, (int) filename, (int) buf, len);
+}
+
 __attribute__((section(".text.start")))//編譯時放到對應section
 __attribute__((naked))
 void start(void){//使用者程式的開始
