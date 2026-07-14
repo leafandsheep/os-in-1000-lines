@@ -73,4 +73,5 @@
 
 - 教材：[OS in 1,000 Lines 繁體中文版](https://operating-system-in-1000-lines.vercel.app/tw/)
 - 作者原始碼：[nuta/operating-system-in-1000-lines](https://github.com/nuta/operating-system-in-1000-lines)
+- claudecode協助指導程式格式與瑣碎問題，不參與程式與心得編寫。
 
